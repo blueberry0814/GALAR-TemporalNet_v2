@@ -1,0 +1,99 @@
+data:
+  features_dir: ./features          # output_dir from extract_features.py
+  labels_dir: ./dataset/Labels      # directory containing per-video CSV files
+  root_dir: ./dataset               # root directory of frame images (for reference only)
+  image_size: 336
+  window_size: 512                  # frames per training window
+  stride: 256                       # window stride during training
+  infer_stride: 128                 # window stride during inference (smaller = more overlap)
+
+model:
+  model_class: model
+  feat_dim: 2048                    # must match extract_features.py output (CLS + patch_mean)
+  hidden_dim: 512
+  n_heads: 8
+  n_layers: 2
+  dropout: 0.1
+  attn_window: 32                   # windowed self-attention block size
+  max_seq_len: 512
+  mamba_d_state: 16
+  mamba_expand: 1
+  sim_threshold: 0.987              # cosine similarity threshold for anatomy GCN edges
+  path_sim_threshold: 0.494         # cosine similarity threshold for pathology GCN edges
+
+inference:
+  batch_size: 1
+  checkpoint: ./checkpoints/best_model.pth
+  output_dir: ./results
+  threshold: 0.4247                 # binary prediction threshold
+  smooth_window: 3                  # median filter window for pathology predictions
+  per_class_threshold: false
+  use_anatomy_gating: true          # suppress anatomically impossible pathology predictions
+  use_cooccurrence_gating: true     # data-driven co-occurrence filtering
+  use_gt_style_composition: true    # GT-style segment composition for submission
+  cooccurrence_cache: ./utils/cooccurrence_matrix.npy
+  cooccurrence_labels_dir: ./dataset/Labels
+  cooccurrence_mode: hard           # "hard" removes zero-cooccurrence pairs only
+  cooccurrence_threshold: 0.01
+
+training:
+  device: cuda
+  seed: 42
+  num_epochs: 140
+  batch_size: 4
+  num_workers: 4
+  val_ratio: 0.2                    # fraction of videos held out for validation
+  eval_interval: 5                  # run temporal mAP evaluation every N epochs
+  log_interval: 10
+  save_dir: ./checkpoints
+
+  # optimizer
+  lr: 3.47e-05
+  weight_decay: 0.0001
+  warmup_epochs: 5
+  grad_clip: 5.0
+
+  # per-branch learning rate multipliers
+  lr_anatomy_mul: 0.19
+  lr_pathology_mul: 2.76
+
+  # loss weights
+  anatomy_loss_weight: 1.0
+  pathology_loss_weight: 4.93
+  proto_loss_weight: 0.0
+  smooth_loss_weight: 0.003
+  mono_loss_weight: 0.39
+  anatomy_cluster_loss_weight: 0.1
+
+  # asymmetric loss parameters (pathology)
+  asl_gamma_pos: 0.445
+  asl_gamma_neg: 3.867
+  asl_clip: 0.05
+
+  # anatomy boundary emphasis
+  transition_loss_boost: 1.30
+  path_transition_loss_boost: 2.57
+
+  # rare class upweighting for anatomy loss
+  mouth_boost: 11.78
+  esoph_boost: 5.59
+  zline_boost: 5.73
+  pylorus_boost: 11.32
+  ileocecal_boost: 7.43
+
+  # pathology class upweighting
+  erosion_boost: 6.0
+  blood_boost: 2.0
+  angio_boost: 3.0
+
+  # regularization
+  mask_ratio: 0.15                  # temporal frame masking during training
+  feat_noise_std: 0.01
+  mixup_alpha: 0.0
+  mixup_prob: 0.0
+
+  # prototype momentum
+  proto_momentum: 0.99
+  anatomy_proto_momentum: 0.99
+
+  warmstart_checkpoint: ''          # path to checkpoint for warm-starting (optional)

@@ -1,0 +1,246 @@
+# GALAR TemporalNet v2
+
+Temporal event detection in GI endoscopy videos — ICPR 2026 RARE-VISION Challenge.
+
+This repository implements **GalarModel**, a dual-branch sequence model that jointly
+classifies anatomy sections (8 classes) and pathology events (9 classes) in capsule
+endoscopy videos using pre-extracted DINOv2/DINOv3 features.
+
+---
+
+## Architecture Overview
+
+```
+DINOv2/DINOv3 ViT-L
+  └─ CLS token  [1024-d]  ─┐
+  └─ patch mean [1024-d]  ─┴─ concat → [2048-d] per frame
+
+GalarModel
+  ├─ ANATOMY BRANCH
+  │    Input Projection + Positional Embedding + Motion Signal
+  │    → Windowed Self-Attention (window=32, ×2 blocks)
+  │    → Dual GCN (Sim-GCN + Dis-GCN)
+  │    → Video GPS (global position prior)
+  │    → Bidirectional Mamba
+  │    → anatomy_logits [B, T, 8]
+  │
+  └─ PATHOLOGY BRANCH
+       Deviation Signal  = patch - normal_prototype (per anatomy)
+       Motion Signal     = patch_t - patch_{t-1}
+       Content Signal    = patch projection + motion
+       → Dual GCN (Sim-GCN + Dis-GCN)
+       → Depthwise Conv (k=5) + Mamba (triple residual)
+       → Fusion + Anatomy Soft Conditioning
+       → pathology_logits [B, T, 9]
+
+Post-processing:
+  anatomy:   smooth probs → Viterbi sequence constraint
+  pathology: median filter → co-occurrence gating → anatomy gap fill
+```
+
+---
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+```
+
+> **Note:** `mamba-ssm` requires CUDA. Install from source if the pip version fails:
+> ```bash
+> pip install mamba-ssm --no-build-isolation
+> ```
+
+---
+
+## Data Structure
+
+The code expects the following directory layout. You do **not** need to place data inside
+this repository — just point the config / CLI args at the right paths.
+
+### Training data
+
+```
+dataset/
+├── Labels/
+│   ├── 1.csv
+│   ├── 2.csv
+│   └── ...         (one CSV per video, named {video_id}.csv)
+├── 1/
+│   ├── frame_000100.PNG
+│   ├── frame_000105.PNG
+│   └── ...
+├── 2/
+│   └── ...
+└── ...
+```
+
+Training CSV format — comma-delimited, with a `frame` column (integer frame number):
+
+```
+index,z-line,pylorus,ileocecal valve,...,mouth,esophagus,stomach,...,frame
+20,0,0,0,...,1,0,0,...,100
+21,0,0,0,...,1,0,0,...,105
+```
+
+### Test data
+
+```
+test/
+├── Labels/
+│   ├── ukdd_navi_00051.csv
+│   ├── ukdd_navi_00068.csv
+│   └── ...
+├── ukdd_navi_00051/
+│   ├── frame_0000049.png
+│   └── ...
+└── ...
+```
+
+Test CSV format — **semicolon-delimited**, with a `frame_file` column (filename string).
+Use `--test_mode` flag when extracting features from test data:
+
+```
+frame_file;mouth;esophagus;stomach;...
+frame_0000049.png;;;;;...
+```
+
+### Pre-extracted features (output of `extract_features.py`)
+
+```
+features/                           ← training features
+├── 1_features.npy    [N_frames, 2048]  float32
+├── 1_frames.npy      [N_frames]        int64 (frame numbers)
+├── 2_features.npy
+└── ...
+
+features_test/                      ← test features
+├── ukdd_navi_00051_features.npy
+├── ukdd_navi_00051_frames.npy
+└── ...
+```
+
+---
+
+## Quick Start
+
+### Step 1 — Extract Features
+
+```bash
+# Training data
+python extract_features.py \
+    --model       dinov2-vitl14 \
+    --labels_dir  ./dataset/Labels \
+    --frames_root ./dataset \
+    --output_dir  ./features \
+    --batch_size  32
+
+# Test data  (note the --test_mode flag for semicolon-delimited CSVs)
+python extract_features.py \
+    --model       dinov2-vitl14 \
+    --labels_dir  ./test/Labels \
+    --frames_root ./test \
+    --output_dir  ./features_test \
+    --batch_size  32 \
+    --test_mode
+```
+
+### Step 2 — Configure
+
+Edit `configs/example.yaml` to match your paths:
+
+```yaml
+data:
+  features_dir: ./features          # directory from Step 1
+  labels_dir:   ./dataset/Labels    # training Labels directory
+
+training:
+  save_dir: ./checkpoints
+  num_epochs: 140
+  ...
+```
+
+### Step 3 — Train
+
+```bash
+python train.py --config configs/example.yaml
+```
+
+Outputs:
+```
+checkpoints/best_model.pth      — best val tMAP checkpoint
+logs/train_log.csv              — per-step loss log
+logs/val_log.csv                — per-epoch validation metrics
+```
+
+### Step 4 — Predict
+
+```bash
+python predict.py \
+    --config     configs/example.yaml \
+    --checkpoint checkpoints/best_model.pth \
+    --feat_dir   ./features_test \
+    --labels_dir ./test/Labels \
+    --output_dir ./results \
+    --min_seg_frames 20 \
+    --fill_gap
+```
+
+Output:
+```
+results/predictions.json        — combined submission file
+results/{video_id}.json         — per-video results
+```
+
+---
+
+## File Structure
+
+```
+GALAR_TemporalNet_v2/
+├── extract_features.py         Feature extraction (DINOv2 / DINOv3)
+├── train.py                    Training with temporal mAP evaluation
+├── predict.py                  Inference and JSON submission generation
+├── requirements.txt
+├── configs/
+│   └── example.yaml            Config template with tuned defaults
+├── models/
+│   └── model.py                GalarModel architecture
+├── data/
+│   └── dataset.py              Sliding-window dataset + stratified split
+└── utils/
+    ├── layers.py                GraphConvolution, DistanceAdj
+    ├── losses.py                AsymmetricLoss, FocalLoss
+    ├── viterbi.py               Anatomy sequence constraint (Viterbi)
+    ├── gap_fill.py              Anatomy gap filling
+    ├── cooccurrence.py          Co-occurrence gating
+    ├── postprocess.py           Anatomy-pathology soft gating, per-class thresholds
+    ├── make_json.py             Label name constants and JSON builder
+    └── cooccurrence_matrix.npy  Pre-computed training co-occurrence statistics
+```
+
+---
+
+## Key Design Choices
+
+| Component | Design | Rationale |
+|--|--|--|
+| Feature backbone | DINOv2 ViT-L/14 (frozen) | Strong visual priors without domain-specific pretraining |
+| CLS / patch split | `features[:, :1024]` = CLS, `[1024:]` = patch mean | CLS for anatomy (global), patch for pathology (local texture) |
+| Anatomy GCN sim threshold | 0.987 | High threshold keeps only near-identical frames connected |
+| Pathology GCN sim threshold | 0.494 | Lower threshold connects visually similar lesion frames |
+| Viterbi anatomy | Forward-only constraint | Enforces biological sequence (mouth→colon) while preserving transitions |
+| Normal prototype | EMA of GT-healthy patch features per anatomy | Enables deviation-based pathology detection without supervision on deviation |
+| Asymmetric Loss (pathology) | γ_pos=0.45, γ_neg=3.87 | Heavy down-weighting of easy negatives in imbalanced multilabel setting |
+
+---
+
+## Citation
+
+If you use this code, please cite:
+```
+@misc{galartemporalnet2026,
+  title  = {GALAR TemporalNet++},
+  year   = {2026},
+}
+```
