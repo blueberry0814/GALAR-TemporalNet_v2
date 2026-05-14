@@ -2,7 +2,7 @@
 
 Temporal event detection in GI endoscopy videos — ICPR 2026 RARE-VISION Challenge.
 
-This repository implements **GalarModel**, a dual-branch sequence model that jointly
+This repository implements **GalarModel v2**, a dual-branch sequence model that jointly
 classifies anatomy sections (8 classes) and pathology events (9 classes) in capsule
 endoscopy videos using pre-extracted DINOv2/DINOv3 features.
 
@@ -53,10 +53,23 @@ pip install -r requirements.txt
 
 ---
 
+## Dataset
+
+| Split | Source | Link |
+|---|---|---|
+| Training | Figshare (GALAR dataset) | [Download](https://plus.figshare.com/articles/dataset/Galar_-_a_large_multi-label_video_capsule_endoscopy_dataset/25304616) |
+| Test | Google Drive (ICPR 2026 RARE) | [Download](https://drive.google.com/drive/folders/17rGcIlR9QEXVJstOP57NKnuYIyW-UuYk) |
+
+> **Evaluation:** Submit your `predictions.json` to the official scoring server at
+> [https://scoringrarevision.streamlit.app/](https://scoringrarevision.streamlit.app/)
+> to get the official temporal mAP score.
+
+---
+
 ## Data Structure
 
-The code expects the following directory layout. You do **not** need to place data inside
-this repository — just point the config / CLI args at the right paths.
+Download the datasets above and place them anywhere on your machine.
+The code only needs the paths — point the config or CLI args at wherever you put the data.
 
 ### Training data
 
@@ -235,12 +248,24 @@ GALAR_TemporalNet_v2/
 
 ---
 
+## Results
+
+Evaluated on the ICPR 2026 RARE-VISION Challenge test set (3 videos) via the
+[official scoring server](https://scoringrarevision.streamlit.app/).
+
+| Metric | ukdd_navi_00051 | ukdd_navi_00068 | ukdd_navi_00076 | **Average** |
+|---|---|---|---|---|
+| Overall mAP @ 0.5  | 0.4782 | 0.1912 | 0.3533 | **0.3409** |
+| Overall mAP @ 0.95 | 0.4706 | 0.1765 | 0.3529 | **0.3333** |
+
+---
+
 ## Citation
 
 If you use this code, please cite:
 ```
 @misc{galartemporalnet2026,
-  title  = {GALAR TemporalNet++},
+  title  = {GALAR TemporalNet v2},
   year   = {2026},
 }
 ```
