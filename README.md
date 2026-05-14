@@ -11,31 +11,7 @@ endoscopy videos using pre-extracted DINOv2/DINOv3 features.
 ## Architecture Overview
 
 ```
-DINOv2/DINOv3 ViT-L
-  └─ CLS token  [1024-d]  ─┐
-  └─ patch mean [1024-d]  ─┴─ concat → [2048-d] per frame
 
-GalarModel
-  ├─ ANATOMY BRANCH
-  │    Input Projection + Positional Embedding + Motion Signal
-  │    → Windowed Self-Attention (window=32, ×2 blocks)
-  │    → Dual GCN (Sim-GCN + Dis-GCN)
-  │    → Video GPS (global position prior)
-  │    → Bidirectional Mamba
-  │    → anatomy_logits [B, T, 8]
-  │
-  └─ PATHOLOGY BRANCH
-       Deviation Signal  = patch - normal_prototype (per anatomy)
-       Motion Signal     = patch_t - patch_{t-1}
-       Content Signal    = patch projection + motion
-       → Dual GCN (Sim-GCN + Dis-GCN)
-       → Depthwise Conv (k=5) + Mamba (triple residual)
-       → Fusion + Anatomy Soft Conditioning
-       → pathology_logits [B, T, 9]
-
-Post-processing:
-  anatomy:   smooth probs → Viterbi sequence constraint
-  pathology: median filter → co-occurrence gating → anatomy gap fill
 ```
 
 ---
@@ -234,19 +210,7 @@ GALAR_TemporalNet_v2/
 
 ---
 
-## Key Design Choices
 
-| Component | Design | Rationale |
-|--|--|--|
-| Feature backbone | DINOv2 ViT-L/14 (frozen) | Strong visual priors without domain-specific pretraining |
-| CLS / patch split | `features[:, :1024]` = CLS, `[1024:]` = patch mean | CLS for anatomy (global), patch for pathology (local texture) |
-| Anatomy GCN sim threshold | 0.987 | High threshold keeps only near-identical frames connected |
-| Pathology GCN sim threshold | 0.494 | Lower threshold connects visually similar lesion frames |
-| Viterbi anatomy | Forward-only constraint | Enforces biological sequence (mouth→colon) while preserving transitions |
-| Normal prototype | EMA of GT-healthy patch features per anatomy | Enables deviation-based pathology detection without supervision on deviation |
-| Asymmetric Loss (pathology) | γ_pos=0.45, γ_neg=3.87 | Heavy down-weighting of easy negatives in imbalanced multilabel setting |
-
----
 
 ## Results
 
