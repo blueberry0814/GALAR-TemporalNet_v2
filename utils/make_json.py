@@ -1,7 +1,7 @@
 """
-예측 결과 (프레임별 이진 배열) → 대회 제출용 JSON 변환
+Convert per-frame binary predictions to challenge submission JSON.
 
-대회 JSON 형식:
+Submission JSON format:
 {
   "videos": [
     {
@@ -14,7 +14,7 @@
   ]
 }
 
-start/end 는 CSV의 'frame' 컬럼 값 (실제 프레임 번호)
+start/end are the 'frame' column values from the label CSV (actual frame numbers).
 """
 
 import json
@@ -32,33 +32,32 @@ PATHOLOGY_LABELS = [
     "active bleeding", "angiectasia", "blood", "erosion", "erythema",
     "hematin", "lymphangioectasis", "polyp", "ulcer"
 ]
-ALL_LABELS = ANATOMY_LABELS + PATHOLOGY_LABELS  # 17개, 순서 고정
+ALL_LABELS = ANATOMY_LABELS + PATHOLOGY_LABELS  # 17 classes, fixed order
 
 
 def predictions_to_events(frame_nums: np.ndarray, pred_binary: np.ndarray, video_id: str) -> dict:
     """
-    프레임 예측 배열을 이벤트 구간으로 변환.
+    Convert per-frame binary prediction array to a list of events.
 
     Args:
-        frame_nums  : [N] 실제 프레임 번호 배열 (CSV frame 컬럼)
-        pred_binary : [N, 17] 이진 예측 (0 or 1)
-        video_id    : 비디오 ID 문자열
+        frame_nums  : [N] actual frame numbers (from CSV 'frame' column)
+        pred_binary : [N, 17] binary predictions (0 or 1)
+        video_id    : video ID string
 
     Returns:
         {"video_id": ..., "events": [...]}
     """
-    assert len(frame_nums) == len(pred_binary), "프레임 수와 예측 수가 다릅니다"
+    assert len(frame_nums) == len(pred_binary), "frame_nums and pred_binary length mismatch"
 
     events = []
     N = len(frame_nums)
 
-    # 각 라벨마다 독립적으로 연속 구간 탐색
+    # find contiguous active segments independently per label
     for cls_idx, label_name in enumerate(ALL_LABELS):
         active = pred_binary[:, cls_idx].astype(bool)
         if not active.any():
             continue
 
-        # 연속된 활성 구간 찾기
         in_event = False
         start_frame = None
 
@@ -71,21 +70,20 @@ def predictions_to_events(frame_nums: np.ndarray, pred_binary: np.ndarray, video
                 end_frame = int(frame_nums[i - 1])
                 events.append({"start": start_frame, "end": end_frame, "label": label_name})
 
-        if in_event:  # 끝까지 활성인 경우
+        if in_event:  # active until the last frame
             events.append({"start": start_frame, "end": int(frame_nums[-1]), "label": label_name})
 
-    # start 기준 정렬
     events.sort(key=lambda e: (e["start"], e["label"]))
     return {"video_id": video_id, "events": events}
 
 
 def build_json_from_predictions(video_predictions: list, output_path: str):
     """
-    여러 비디오 예측을 합쳐 최종 JSON 생성.
+    Merge predictions from multiple videos into the final submission JSON.
 
     Args:
         video_predictions: list of {"video_id", "frame_nums", "pred_binary"} dicts
-        output_path: 저장할 .json 파일 경로
+        output_path: path to save the .json file
     """
     result = {"videos": []}
     for vp in tqdm(video_predictions, desc="Building JSON"):
@@ -98,12 +96,12 @@ def build_json_from_predictions(video_predictions: list, output_path: str):
 
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
-    print(f"JSON 저장 완료: {output_path}")
+    print(f"Saved: {output_path}")
 
 
 def build_json_from_gt_csvs(labels_dir: str, output_path: str):
     """
-    Ground truth CSV 파일들로부터 JSON 생성 (검증용).
+    Build a GT-format JSON from label CSV files (for evaluation / debugging).
     """
     labels_path = Path(labels_dir)
     result = {"videos": []}
@@ -117,7 +115,7 @@ def build_json_from_gt_csvs(labels_dir: str, output_path: str):
         frame_nums = df["frame"].values.astype(np.int64)
         labels = df[label_cols].values.astype(np.float32)
 
-        # ALL_LABELS 순서로 맞추기
+        # reorder to match ALL_LABELS order
         full_labels = np.zeros((len(df), 17), dtype=np.float32)
         for i, lbl in enumerate(ALL_LABELS):
             if lbl in label_cols:
@@ -128,13 +126,13 @@ def build_json_from_gt_csvs(labels_dir: str, output_path: str):
 
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2)
-    print(f"GT JSON 저장 완료: {output_path}")
+    print(f"Saved GT JSON: {output_path}")
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--labels_dir", type=str, required=True, help="CSV 라벨 폴더 경로")
+    parser.add_argument("--labels_dir", type=str, required=True, help="Directory containing label CSV files")
     parser.add_argument("--output", type=str, default="gt_events.json")
     args = parser.parse_args()
     build_json_from_gt_csvs(args.labels_dir, args.output)

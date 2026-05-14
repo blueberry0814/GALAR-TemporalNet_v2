@@ -13,7 +13,7 @@ Post-processing utilities
    - Optimizes F1 or balanced accuracy per class
    - Falls back to lower threshold for rare classes
 
-사용법:
+Usage:
   from utils.postprocess import (
       build_anatomy_pathology_gate,
       apply_anatomy_gating,
@@ -48,12 +48,12 @@ def build_anatomy_pathology_gate(
     min_gate: float = 0.05,
 ) -> np.ndarray:
     """
-    데이터로부터 anatomy × pathology soft gate 행렬 계산.
+    Compute anatomy × pathology soft gate matrix from training data.
 
     gate[a, p] = soft gate value in [min_gate, 1.0]
-      - P(path p | anatomy a) > soft_threshold → 1.0 (완전 허용)
-      - P < hard_threshold                     → min_gate (억제, 완전 제거 아님)
-      - 그 사이                                → 선형 보간
+      - P(path p | anatomy a) > soft_threshold → 1.0 (fully allowed)
+      - P < hard_threshold                     → min_gate (suppressed, not zeroed)
+      - in between                             → linear interpolation
 
     Returns
     -------
@@ -81,7 +81,7 @@ def build_anatomy_pathology_gate(
         if anat_cnt[ai] > 0:
             cond[ai] = comat[ai] / anat_cnt[ai]
 
-    # 전환점 마커(z-line 등)는 인접 anatomy의 gate 값을 상속
+    # transition markers (z-line, pylorus, ileocecal) inherit gate values from adjacent anatomy
     # z-line ↔ esophagus, pylorus ↔ stomach, ileocecal ↔ colon
     inherit_map = {
         ANATOMY_LABELS.index("z-line"):           ANATOMY_LABELS.index("esophagus"),
@@ -89,10 +89,8 @@ def build_anatomy_pathology_gate(
         ANATOMY_LABELS.index("ileocecal valve"):   ANATOMY_LABELS.index("colon"),
     }
     for child, parent in inherit_map.items():
-        # 자신의 cond와 부모의 cond 중 더 큰 값 사용
         cond[child] = np.maximum(cond[child], cond[parent] * 0.5)
 
-    # Soft gate: [min_gate, 1.0]으로 매핑
     gate = np.clip(
         (cond - hard_threshold) / max(soft_threshold - hard_threshold, 1e-9),
         0.0, 1.0,
@@ -111,16 +109,15 @@ def apply_anatomy_gating(
 
     Parameters
     ----------
-    anatomy_probs   : [T, 8]  sigmoid 확률 (0~1)
-    pathology_probs : [T, 9]  sigmoid 확률 (0~1)
+    anatomy_probs   : [T, 8]  sigmoid probabilities (0~1)
+    pathology_probs : [T, 9]  sigmoid probabilities (0~1)
     gate            : [8, 9]  gate matrix from build_anatomy_pathology_gate()
 
     Returns
     -------
-    gated : [T, 9]  가중치 적용된 pathology 확률
+    gated : [T, 9]  weighted pathology probabilities
     """
-    T = anatomy_probs.shape[0]
-    # 해부학 확률로 gate를 가중 평균 → 프레임별 effective gate [T, 9]
+    # anatomy-weighted average of gate values -> per-frame effective gate [T, 9]
     effective_gate = anatomy_probs @ gate        # [T, 9]
     effective_gate = np.clip(effective_gate, 0.05, 1.0)
     return pathology_probs * effective_gate
@@ -142,7 +139,7 @@ def gt_style_event_composition(
 
     Parameters
     ----------
-    frame_nums    : [T]       int, 실제 프레임 번호
+    frame_nums    : [T]       int, actual frame numbers
     anatomy_bin   : [T, 8]    int binary (0 or 1)
     pathology_bin : [T, 9]    int binary (0 or 1)
     label_names   : list of 17 label names (optional, for debug)
@@ -170,7 +167,7 @@ def gt_style_event_composition(
     for t in range(1, T):
         current_set = tuple(all_bin[t].tolist())
         if current_set != seg_label_set:
-            # label set 변경 → 이전 segment 완료
+            # label set changed — close previous segment
             if any(seg_label_set):
                 active_idx = [i for i, v in enumerate(seg_label_set) if v]
                 segments.append({
@@ -182,7 +179,7 @@ def gt_style_event_composition(
             seg_start     = t
             seg_label_set = current_set
 
-    # 마지막 segment
+    # final segment
     if any(seg_label_set):
         active_idx = [i for i, v in enumerate(seg_label_set) if v]
         segments.append({
@@ -200,8 +197,8 @@ def segments_to_per_class(
     n_classes: int = 17,
 ) -> dict:
     """
-    gt_style_event_composition 출력을 클래스별 segment list로 변환.
-    inference.py의 _frames_to_segments 형식 호환.
+    Convert gt_style_event_composition output to a per-class segment list.
+    Compatible with inference.py _frames_to_segments format.
 
     Returns
     -------
@@ -224,15 +221,15 @@ def optimize_per_class_thresholds(
     min_pos:     int = 10,
 ) -> np.ndarray:
     """
-    클래스별 최적 threshold 탐색 (F1 또는 balanced accuracy 기준).
+    Search for the optimal per-class threshold (F1 or balanced accuracy).
 
     Parameters
     ----------
-    all_probs  : [N, C]  sigmoid 확률 (0~1)
+    all_probs  : [N, C]  sigmoid probabilities (0~1)
     all_labels : [N, C]  binary GT (0 or 1)
     method     : "f1" | "ba" (balanced accuracy)
-    n_thresholds : threshold grid points
-    min_pos    : 최소 양성 샘플 수 (미달 시 0.5 기본값)
+    n_thresholds : number of threshold grid points
+    min_pos    : minimum positive samples required (falls back to 0.3 if below)
 
     Returns
     -------
@@ -286,12 +283,12 @@ def anatomy_vote_smoothing(
 
     Parameters
     ----------
-    anatomy_probs : [T, 8]  확률 또는 binary
-    radius        : 윈도우 반경
+    anatomy_probs : [T, 8]  probabilities or binary values
+    radius        : window radius
 
     Returns
     -------
-    smoothed : [T, 8] float (majority vote 후 0/1)
+    smoothed : [T, 8] float (majority-voted 0/1)
     """
     T, C = anatomy_probs.shape
     binary = (anatomy_probs >= 0.5).astype(np.float32)
@@ -301,16 +298,15 @@ def anatomy_vote_smoothing(
         lo = max(0, t - radius)
         hi = min(T, t + radius + 1)
         window = binary[lo:hi]
-        # majority vote per class
         smoothed[t] = (window.mean(axis=0) >= 0.5).astype(np.float32)
 
     return smoothed
 
 
-# ── 진단: co-occurrence 출력 ──────────────────────────────────────────────────
+# ── Debug: print co-occurrence stats ─────────────────────────────────────────
 
 def print_cooccurrence_stats(label_dir: str, threshold: float = 0.01):
-    """데이터 기반 anatomy-pathology co-occurrence 요약 출력 (디버깅용)."""
+    """Print anatomy-pathology co-occurrence summary from data (for debugging)."""
     gate = build_anatomy_pathology_gate(label_dir, soft_threshold=threshold)
     print(f"=== Anatomy-Pathology Gate (threshold={threshold*100:.1f}%) ===")
     header = "".join(f"{p[:8]:>10}" for p in PATHOLOGY_LABELS)

@@ -17,16 +17,16 @@ from scipy.signal import medfilt
 _ANAT_LINEAR_SEQ = [0, 1, 5, 2, 6, 3, 7, 4]
 _POS_IN_SEQ = {cls: i for i, cls in enumerate(_ANAT_LINEAR_SEQ)}
 
-# 클래스별 smooth window (long-duration 클래스는 크게, transition marker는 작게)
-# 인덱스: mouth=0, esophagus=1, stomach=2, SI=3, colon=4, z-line=5, pylorus=6, ileocecal=7
+# Per-class median filter window (larger for long-duration classes, smaller for transition markers)
+# indices: mouth=0, esophagus=1, stomach=2, SI=3, colon=4, z-line=5, pylorus=6, ileocecal=7
 _ANATOMY_SMOOTH_WINDOWS = [5, 5, 11, 21, 11, 3, 3, 5]
 
 
 def smooth_anatomy_probs(pred_probs_anatomy: np.ndarray) -> np.ndarray:
     """
-    클래스별로 다른 median filter window 적용.
-    - stomach(2), SI(3), colon(4): 큰 window → 중간의 짧은 dip 제거
-    - z-line(5), pylorus(6): 작은 window → 짧은 이벤트 보존
+    Apply per-class median filter with class-specific window sizes.
+    - stomach(2), SI(3), colon(4): large window to remove short dips
+    - z-line(5), pylorus(6): small window to preserve brief events
     """
     out = pred_probs_anatomy.copy()
     for c, w in enumerate(_ANATOMY_SMOOTH_WINDOWS):
@@ -73,22 +73,23 @@ def viterbi_anatomy(
     lookback: int   = 1,
 ) -> np.ndarray:
     """
-    Forward-only Viterbi: 역방향 전환만 억제, 확률값은 최대한 보존.
+    Forward-only Viterbi: suppress backward transitions while preserving probability values.
 
-    기존 방식 문제:
-      - 승자 외 모든 클래스를 (1-alpha)로 억제 → transition zone에서 두 번째 클래스 소멸
-      - SI + pylorus 동시 활성 불가 → 경계 파편화 원인
+    Problem with naive Viterbi:
+      - Suppressing all non-winner classes by (1-alpha) collapses the second class
+        in transition zones, causing boundary fragmentation (e.g., SI+pylorus impossible)
 
-    변경 방식:
-      - Viterbi path로 현재 시퀀스 위치(path_pos) 계산
-      - path_pos 기준 lookback 이하 단계 뒤 클래스만 억제 (역방향 방지)
-      - lookback 이내(transition zone)와 앞 방향: 원래 확률 그대로 보존
-      - 결과: SI 구간에서 pylorus(1단계 뒤)는 살고, stomach(2단계 뒤)만 억제
+    This implementation:
+      - Computes the Viterbi path to determine the current sequence position (path_pos)
+      - Suppresses only classes that are more than (lookback+1) steps behind path_pos
+      - Classes within the transition zone (<=lookback steps behind) and forward classes
+        retain their original probabilities
+      - Result: in an SI segment, pylorus (1 step behind) survives; stomach (2 steps behind) is suppressed
 
     Args:
         pred_probs_anatomy : [T, 8] sigmoid probabilities
-        alpha    : 억제 강도 — 0=억제 없음, 1=완전 제거 (default 0.7 → ×0.3)
-        lookback : transition zone 허용 범위 — 1=1단계 뒤까지 허용
+        alpha    : suppression strength — 0=none, 1=full removal (default 0.7 → ×0.3)
+        lookback : transition zone width — 1 means 1 step behind is allowed
 
     Returns:
         [T, 8] forward-constrained probabilities
@@ -99,7 +100,7 @@ def viterbi_anatomy(
 
     log_trans = _build_log_trans()
 
-    # Viterbi path 계산 (확률 정규화는 path 계산 전용)
+    # Viterbi path computation (normalize probabilities for path only)
     probs    = pred_probs_anatomy.astype(np.float64)
     probs    = probs / (probs.sum(axis=1, keepdims=True) + 1e-8)
     log_emit = np.log(probs + 1e-8)
@@ -118,10 +119,10 @@ def viterbi_anatomy(
     for t in range(T - 2, -1, -1):
         path[t] = backptr[t + 1, path[t + 1]]
 
-    # Forward-only constraint: path보다 (lookback+1)단계 이상 뒤에 있는 클래스만 억제
-    # transition zone (lookback 이내)와 앞 방향은 원래 확률 보존
+    # Forward-only constraint: suppress classes more than (lookback+1) steps behind path
+    # transition zone (within lookback) and forward classes keep original probabilities
     smoothed = pred_probs_anatomy.astype(np.float32).copy()
-    suppress = 1.0 - alpha  # 억제된 클래스가 유지하는 비율
+    suppress = 1.0 - alpha  # fraction of probability retained after suppression
     for t in range(T):
         path_pos = _POS_IN_SEQ[path[t]]
         for cls in range(N):

@@ -1,17 +1,17 @@
 """
 Anatomy gap filling post-processing.
 
-GT 분석 결과 기반 MAX_GAP 설정:
-  - small intestine: 500 frames  (GT gap p75=621, ≥1000은 실제 전환)
-  - colon          : 700 frames  (GT gap 대부분 <1000)
-  - stomach        : 400 frames  (GT gap median=97, 보수적)
-  - esophagus      : 150 frames  (GT gap 거의 없음)
-  - z-line/pylorus/ileocecal/mouth: 적용 안 함 (transition-point)
+MAX_GAP values derived from GT analysis:
+  - small intestine: 500 frames  (GT gap p75=621; gaps >=1000 are true transitions)
+  - colon          : 700 frames  (GT gaps mostly <1000)
+  - stomach        : 400 frames  (GT gap median=97; conservative)
+  - esophagus      : 150 frames  (GT gaps rarely large)
+  - z-line/pylorus/ileocecal/mouth: not filled (transition-point classes)
 """
 
 import numpy as np
 
-# cls index → MAX_GAP (0이면 fill 안 함)
+# class index -> MAX_GAP in frames (0 = skip)
 DEFAULT_MAX_GAP = {
     0: 0,    # mouth           — transition point
     1: 150,  # esophagus
@@ -26,20 +26,20 @@ DEFAULT_MAX_GAP = {
 
 def fill_anatomy_gaps(
     pred_binary: np.ndarray,   # [N, 17] int32
-    frame_nums: np.ndarray,    # [N] int64, 실제 프레임 번호
-    max_gap: dict = None,      # {cls: max_gap_frames}, None이면 DEFAULT 사용
+    frame_nums: np.ndarray,    # [N] int64, actual frame numbers
+    max_gap: dict = None,      # {cls: max_gap_frames}; defaults to DEFAULT_MAX_GAP
 ) -> np.ndarray:
     """
-    anatomy 클래스(0~7)의 예측 gap을 채워 반환.
+    Fill prediction gaps for anatomy classes (indices 0-7).
 
-    조건:
-      1. 같은 클래스가 gap 양쪽에 존재
-      2. gap 크기(프레임 수) <= max_gap[cls]
-      3. gap 구간 내에서 다른 anatomy 클래스가 과반 이상 활성화되지 않음
-         (다른 anatomy가 강하게 예측된 곳은 실제 전환으로 간주)
+    A gap is filled when all three conditions hold:
+      1. The same class is active on both sides of the gap
+      2. Gap size (in frames) <= max_gap[cls]
+      3. No other anatomy class is active for >50% of the gap frames
+         (majority competing anatomy indicates a true transition)
 
     Returns:
-        수정된 pred_binary 복사본 [N, 17]
+        Modified copy of pred_binary [N, 17]
     """
     if max_gap is None:
         max_gap = DEFAULT_MAX_GAP
@@ -56,39 +56,39 @@ def fill_anatomy_gaps(
         i = 0
 
         while i < N:
-            # active 구간 시작 찾기
+            # find start of active segment
             if not arr[i]:
                 i += 1
                 continue
 
-            # active 구간 끝 찾기
+            # find end of active segment
             seg1_end = i
             while seg1_end + 1 < N and arr[seg1_end + 1]:
                 seg1_end += 1
 
-            # gap 시작
+            # gap starts here
             gap_start = seg1_end + 1
             if gap_start >= N:
                 break
 
-            # gap 끝 (다음 active 구간 시작)
+            # find start of next active segment
             j = gap_start
             while j < N and not arr[j]:
                 j += 1
 
             if j >= N:
-                # 다음 active 구간 없음
+                # no next active segment
                 i = j
                 continue
 
             seg2_start = j
             gap_end = seg2_start - 1
 
-            # gap 크기 (실제 프레임 수)
+            # gap size in actual frames
             gap_frames = int(frame_nums[gap_end]) - int(frame_nums[gap_start]) + 1
 
             if gap_frames <= mg:
-                # 조건 3: gap 구간 내 다른 anatomy가 과반 이상인지 확인
+                # condition 3: check if any other anatomy dominates the gap
                 gap_len = gap_end - gap_start + 1
                 competing = False
                 for other_cls in range(8):

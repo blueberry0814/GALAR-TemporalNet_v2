@@ -1,14 +1,14 @@
 """
-Galar 데이터셋 — 슬라이딩 윈도우 기반 (DINOv2 사전 추출 특징 사용)
+Sliding-window dataset for GALAR GI endoscopy videos (pre-extracted DINOv2 features).
 
-파이프라인:
-  1. extract_features.py 로 각 비디오의 특징을 .npy로 저장
-  2. 이 Dataset이 .npy + CSV를 로드해 window 단위로 반환
+Pipeline:
+  1. Run extract_features.py to save per-video features as .npy files
+  2. This Dataset loads .npy + CSV files and yields fixed-size windows
 
-파일 구조 가정:
+Expected file structure:
   features_dir/{video_id}_features.npy  : [N, feat_dim] float32
-  features_dir/{video_id}_frames.npy    : [N] int64  (실제 프레임 번호)
-  labels_dir/{video_id}.csv             : index, frame, label 컬럼 포함
+  features_dir/{video_id}_frames.npy    : [N] int64  (actual frame numbers)
+  labels_dir/{video_id}.csv             : columns include 'frame' and label names
 """
 
 import os
@@ -26,14 +26,14 @@ PATHOLOGY_LABELS = [
     "active bleeding", "angiectasia", "blood", "erosion", "erythema",
     "hematin", "lymphangioectasis", "polyp", "ulcer"
 ]
-ALL_LABELS = ANATOMY_LABELS + PATHOLOGY_LABELS  # 17개 고정 순서
+ALL_LABELS = ANATOMY_LABELS + PATHOLOGY_LABELS  # 17 classes, fixed order
 
 
 class GalarWindowDataset(Dataset):
     """
-    슬라이딩 윈도우 Dataset.
-    각 아이템 = 연속된 window_size 프레임의 (특징, 라벨, 프레임번호).
-    마지막 윈도우는 패딩으로 채움.
+    Sliding-window Dataset.
+    Each item is (features, labels, frame_nums) for a contiguous window_size-frame segment.
+    The last window is zero-padded if shorter than window_size.
     """
 
     def __init__(
@@ -56,7 +56,7 @@ class GalarWindowDataset(Dataset):
         for vid_id in video_ids:
             if preloaded is not None:
                 if vid_id not in preloaded:
-                    print(f"[SKIP] {vid_id}: preloaded 캐시 없음")
+                    print(f"[SKIP] {vid_id}: not found in preloaded cache")
                     continue
                 feats, frame_arr, label_arr = preloaded[vid_id]
                 n = len(feats)
@@ -65,7 +65,7 @@ class GalarWindowDataset(Dataset):
                 frame_path = os.path.join(features_dir, f"{vid_id}_frames.npy")
                 label_path = os.path.join(labels_dir, f"{vid_id}.csv")
                 if not all(os.path.exists(p) for p in [feat_path, frame_path, label_path]):
-                    print(f"[SKIP] {vid_id}: 특징 파일 또는 라벨 없음")
+                    print(f"[SKIP] {vid_id}: missing feature file or label CSV")
                     continue
                 feats     = np.load(feat_path, mmap_mode='r').astype(np.float32)
                 frame_arr = np.load(frame_path).astype(np.int64)
@@ -97,7 +97,7 @@ class GalarWindowDataset(Dataset):
         labels    = np.array(self.label_cache[vid_id][start:end],  dtype=np.float32)
         T_actual  = len(feats)
 
-        # 패딩 (윈도우 끝 부분)
+        # zero-pad the last window if shorter than window_size
         if T_actual < self.window_size:
             pad = self.window_size - T_actual
             feats     = np.vstack([feats,     np.zeros((pad, feats.shape[1]), dtype=np.float32)])
@@ -119,8 +119,8 @@ class GalarWindowDataset(Dataset):
 
 def compute_pos_weights(dataset: GalarWindowDataset) -> torch.Tensor:
     """
-    전체 학습 데이터에서 각 클래스별 양성 비율의 역수 계산.
-    BCE pos_weight 인자로 사용.
+    Compute inverse positive-frequency weights per class over the entire training set.
+    Used as pos_weight in BCEWithLogitsLoss.
     """
     all_labels = np.vstack([
         dataset.label_cache[vid]
@@ -134,18 +134,16 @@ def compute_pos_weights(dataset: GalarWindowDataset) -> torch.Tensor:
 
 def make_weighted_sampler(dataset: GalarWindowDataset) -> WeightedRandomSampler:
     """
-    희귀 병변 클래스를 포함한 윈도우를 더 자주 샘플링하는 WeightedRandomSampler.
-    병변 양성 프레임 수 비례로 윈도우 가중치를 계산.
+    WeightedRandomSampler that oversamples windows containing rare pathology classes.
+    Window weight is proportional to the number of positive pathology frames inside.
     """
-    # 병변 클래스 인덱스 (ALL_LABELS 기준 8~16번)
-    pathology_idx = list(range(8, 17))
+    pathology_idx = list(range(8, 17))  # pathology class indices in ALL_LABELS
 
     weights = []
     for vid_id, start, end in dataset.windows:
         window_labels = dataset.label_cache[vid_id][start:end]  # [T, 17]
-        # 희귀 병변 양성 프레임 수 → 가중치
         rare_count = window_labels[:, pathology_idx].sum()
-        weights.append(1.0 + rare_count * 2.0)  # 5.0 → 2.0: 과도한 쏠림으로 loss 폭발 방지
+        weights.append(1.0 + rare_count * 2.0)
 
     weights_tensor = torch.tensor(weights, dtype=torch.float)
     return WeightedRandomSampler(weights_tensor, num_samples=len(weights), replacement=True)
@@ -158,14 +156,15 @@ def stratified_video_split(
     seed: int = 42,
 ) -> "tuple[list, list]":
     """
-    희귀 병변 클래스가 train/val 양쪽에 고루 포함되도록 비디오 단위 split.
+    Video-level train/val split that ensures rare pathology classes appear in both splits.
 
-    각 비디오의 '보유 병변 집합'을 계산하고,
-    희귀 클래스 분포가 균형 잡히도록 정렬 후 분할.
+    For each video, compute the set of pathology classes it contains.
+    Assign videos to val first if they cover pathology classes not yet in val,
+    then fill the remaining val quota, then assign the rest to train.
     """
     np.random.seed(seed)
 
-    # 비디오별 병변 보유 여부 집계
+    # aggregate pathology classes present per video
     video_pathology = {}
     for vid_id in video_ids:
         label_path = os.path.join(labels_dir, f"{vid_id}.csv")
@@ -179,11 +178,10 @@ def stratified_video_split(
                 present.add(col)
         video_pathology[vid_id] = present
 
-    # 드문 병변을 가진 비디오를 먼저 val에 배분 (최소 1개 보장)
     val_set, train_set = [], []
     covered_in_val = set()
 
-    # 희귀 순으로 정렬 (병변 종류 적은 것 먼저)
+    # sort by number of pathology classes (fewest first) to prioritize rare coverage
     sorted_vids = sorted(video_ids, key=lambda v: len(video_pathology[v]))
     np.random.shuffle(sorted_vids)
 
@@ -191,7 +189,7 @@ def stratified_video_split(
 
     for vid in sorted_vids:
         path_set = video_pathology[vid]
-        # val에 아직 없는 병변을 가지면 val에 우선 배정
+        # prioritize videos with pathology classes not yet covered in val
         if len(val_set) < n_val and not path_set.issubset(covered_in_val):
             val_set.append(vid)
             covered_in_val |= path_set
@@ -200,7 +198,7 @@ def stratified_video_split(
         else:
             train_set.append(vid)
 
-    # 나머지 비디오는 train
+    # assign any remaining videos to train
     for vid in sorted_vids:
         if vid not in val_set and vid not in train_set:
             train_set.append(vid)
@@ -209,7 +207,7 @@ def stratified_video_split(
 
 
 def preload_features(video_ids: list, features_dir: str, labels_dir: str) -> dict:
-    """모든 비디오 피처를 mmap으로 한 번만 로드. Optuna 전역 캐시용."""
+    """Load all video features into memory once via mmap. Used as a shared cache during training."""
     cache = {}
     for vid_id in video_ids:
         feat_path  = os.path.join(features_dir, f"{vid_id}_features.npy")
