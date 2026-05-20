@@ -12,9 +12,8 @@ endoscopy videos using pre-extracted DINOv2/DINOv3 features.
 
 ```
 
-<img width="4230" height="2484" alt="icpr_data_figure" src="https://github.com/user-attachments/assets/5bda37cd-a5f1-470d-b6fe-ff4c20b62af0" />
+<img width="4230" height="2484" alt="icpr_data_figure" src="https://github.com/user-attachments/assets/5e7e26d6-bec9-47f0-b2bd-3cd896760d38" />
 
-<img width="4389" height="2379" alt="icpr_figure_v3" src="https://github.com/user-attachments/assets/31216f79-67b9-4d80-aa78-318e98b62f4b" />
 ```
 
 ---
