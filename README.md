@@ -233,9 +233,10 @@ We thank the organizers for providing the dataset and evaluation infrastructure.
 ## Citation
 
 If you use this code, please cite:
-```
+```bibtex
 @misc{galartemporalnet2026,
   title  = {GALAR TemporalNet v2},
+  author = {Won, Jiye and Jung, Soonki},
   year   = {2026},
 }
 ```
