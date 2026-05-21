@@ -2,7 +2,7 @@
 
 Temporal event detection in GI endoscopy videos — ICPR 2026 RARE-VISION Challenge.
 
-This repository implements **GalarModel v2**, a dual-branch sequence model that jointly
+This repository implements **Galar TemporalNet v2**, a dual-branch sequence model that jointly
 classifies anatomy sections (8 classes) and pathology events (9 classes) in capsule
 endoscopy videos using pre-extracted DINOv2/DINOv3 features.
 
