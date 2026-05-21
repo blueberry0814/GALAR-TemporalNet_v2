@@ -222,6 +222,14 @@ Evaluated on the ICPR 2026 RARE-VISION Challenge test set (3 videos) via the
 
 ---
 
+## Acknowledgements
+
+This work was developed as part of the 
+[ICPR 2026 RARE-VISION Competition](https://github.com/RAREChallenge2026/RARE-VISION-2026-Challenge).
+We thank the organizers for providing the dataset and evaluation infrastructure.
+
+---
+
 ## Citation
 
 If you use this code, please cite:
@@ -229,5 +237,62 @@ If you use this code, please cite:
 @misc{galartemporalnet2026,
   title  = {GALAR TemporalNet v2},
   year   = {2026},
+}
+```
+
+
+**Competition:**
+```bibtex
+@misc{lawniczak2025rarevision,
+  author = {Lawniczak, Anni and Dhir, Manas and Le Floch, Maxime 
+            and Handa, Palak and Koulaouzidis, Anastasios},
+  title  = {ICPR 2026 RARE-VISION Competition Document and Flyer},
+  year   = {2025},
+  doi    = {10.6084/m9.figshare.30884858.v3},
+  url    = {https://figshare.com/articles/preprint/
+            ICPR_2026_RARE-VISION_Competition_Document_and_Flyer/30884858}
+}
+```
+
+**Dataset:**
+```bibtex
+@misc{lefloch2025galar,
+  author = {Le Floch, Maxime and Wolf, Fabian and McIntyre, Lucian 
+            and Herzog, Paul and Weinert, Christoph and Palm, Albrecht 
+            and Volk, Konrad and Kirk, Sophie Helene and 
+            Steinh{\"a}user, Jonas L. and Stopp, Catrein and 
+            Geissler, Mark Enrik and Herzog, Moritz and Sulk, Stefan 
+            and Kather, Jakob Nikolas and Meining, Alexander and 
+            Hann, Alexander and Hampe, Jochen and 
+            Herzog, Nora and Brinkmann, Franz},
+  title  = {Galar -- a large multi-label video capsule endoscopy dataset},
+  year   = {2025},
+  doi    = {10.25452/figshare.plus.25304616.v2},
+  url    = {https://plus.figshare.com/articles/dataset/
+            Galar_-_a_large_multi-label_video_capsule_endoscopy_dataset/25304616}
+}
+```
+
+**Test Data:**
+```bibtex
+@misc{lefloch2026testdata,
+  author = {Le Floch, Maxime and Lawniczak, Anni and Stopp, Catrein 
+            and Zech, Alexander and Kolbig, Alexandra and Tolle, Hannah 
+            and Steinhaeuser-Meerz, Jonas L. and Hampe, Jochen 
+            and Brinkmann, Franz},
+  title  = {Test Data for ICPR 2026 -- RARE-VISION Competition},
+  year   = {2026},
+  url    = {https://doi.org/10.25532/OPARA-1119}
+}
+```
+
+**Evaluation Server:**
+```bibtex
+@misc{dhir2026rareeval,
+  author = {Dhir, Manas and Handa, Palak and Lawniczak, Anni 
+            and Le Floch, Maxime},
+  title  = {RareEval Scoring App},
+  year   = {2026},
+  url    = {https://scoringrarevision.streamlit.app/}
 }
 ```
