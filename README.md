@@ -13,8 +13,7 @@ This repository accompanies the following preprint:
 
 > **GALAR-TemporalNet v2: Anatomy-Guided Temporal Multi-Label 
 > Classification with Bidirectional Mamba and Dual-Graph GCN 
-> for Video Capsule Endoscopy — after competition results**  
-> Jiye Won, Seangmin Lee, Soonki Jung  
+> for Video Capsule Endoscopy — after competition results**   
 > *ICPR 2026 RARE-VISION Competition — Post-Competition Report*  
 >
 > 📎 [Read on ResearchGate](https://www.researchgate.net/publication/402959380_GALAR-TemporalNet_v2_Anatomy-Guided_Temporal_Multi-Label_Classification_with_Bidirectional_Mamba_and_Dual-Graph_GCN_for_Video_Capsule_Endoscopy_-_after_competition_results)
